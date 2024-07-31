@@ -18,25 +18,24 @@ class Service extends Response {
         <title></title>
         <meta http-equiv="pragma" content="no-cache">
         <meta http-equiv="cache-control" content="no-cache">
+        <script src="https://unpkg.com/petite-vue" defer init></script>
         <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.2.3/dist/css/bootstrap.min.css">
         <link rel="stylesheet" href="/css/fa.svgicon.css">
-        <style>
-            @import url("webfonts/content/import.css");
-            body {
-                margin: 0;
-            }
-            div {
-            }
-        </style>
+        <link rel="stylesheet" href="/css/index.css">
         </head>
         <body>
-            <div class="container">
+            <div
+                id="container"
+                class="container load"
+                v-scope="petite"
+                @vue:mounted="mounted">
                 <main>
                     <div class="row row g-3">
                         <?php $this->form(); ?>
                     </div>
                 </main>
             </div>
+        <script src="index.js"></script>
         </body>
         </html>
         <?php
@@ -48,40 +47,39 @@ class Service extends Response {
 
     public function form(){
         ?>
-        <p>save or get remote google fonts in de local</p>
-        <form method="POST" action="/apply" >
+        <p class="text-uppercase text-center">google fonts to local</p>
             <div class="col-12">
                 <label for="url" class="form-label">Google fonts url:</label>
-                <input type="text" id="url" class="form-control" name="fontsUrl"
+                <input type="text" id="url" class="form-control" v-model="url"
                        placeholder="https://fonts.googleapis.com/css2?family=Material+Symbols..."
                 /><br>
             </div>
             <div class="col-12">
               <div class="form-check">
                 <label class="form-check-label"><input name="action" type="radio"
-                class="form-check-input" value="store" checked="" required="">Public</label>
+                class="form-check-input" value="store" v-model="type">Public</label>
               </div>
               <div class="form-check">
                 <label class="form-check-label"><input name="action" type="radio"
-                class="form-check-input" value="download" required="">Download</label>
+                class="form-check-input" value="download" v-model="type">Download</label>
               </div>
             </div>
-            <div class="col-12">
-                <label class="form-label">Download Order name:</label>
-                <input type="text" name="download" class="form-control">
+            <div class="col-12" v-if="type=='download'">
+                <label class="form-label">Ordner name:</label>
+                <input type="text" v-model="folder" class="form-control">
             </div>
-            <br><br>
-            <?php if ( isset( $this->file )) { ?>
-            <div class="col-12">
-                <a class="stretched-link" href="<?=$this->file;?>"
-                download>Download: <?=$this->file;?></a>
+            <div class="col-12 download-box" v-show="response.length">
+                <a class="stretched-link"
+                   :href="response"
+                download>Download: {{ response }}</a>
             </div>
-            <?php } ?>
             <div class="col-12">
-                <button class="w-100 btn btn-primary btn-lg"
-                type="submit">Speichern</button>
+                <button class="w-100 btn btn-primary btn-lg position-relative"
+                @click="save"><span>Speichern</span>
+                <img v-show="sandbox" class="sandbox"
+                     src="css/sand.svg">
+                </button>
             </div>
-        </form>
         <?php
     }
 
@@ -90,10 +88,10 @@ class Service extends Response {
         return 'https://' . $_SERVER['HTTP_HOST'];
     }
 
-    public function addOrderName($src){
+    public function addFolderName($src){
 
-        $ordner = strlen($_POST['download'] ?? '')
-                       ? $_POST['download'] . '/' : '';
+        $ordner = strlen($_POST['folder'] ?? '')
+                       ? $_POST['folder'] . '/' : '';
 
         return $ordner . $src;
     }
@@ -104,8 +102,9 @@ class Service extends Response {
 
         if ( $this->zip ) {
 
-            $file = $this->app->config['fonts'].$src;
-            $this->zip->addFile( $file, $this->addOrderName( $src ));
+            $file = $this->app->config['fonts'] . $src;
+            $this->zip->addFile( $file, $this->addFolderName($realname) );
+            $src = $realname;
 
         } else return $this->host() .'/store/' . $src;
 
@@ -114,36 +113,52 @@ class Service extends Response {
 
     public function apply(){
 
-        if ( isset( $_POST['fontsUrl'], $_POST['action'] )) {
+        try {
 
-            $google = new Google( $this );
-            $__import = $google->getImportHeader($_POST['fontsUrl']);
-            $filename = hash('xxh64', $_POST['fontsUrl']);
+            $return = [ 'error' => $_POST ];
 
-            if ( $_POST['action'] == 'download' ) {
+            if ( strlen( $_POST['url'] ?? '') && strlen( $_POST['type'] ?? ''  ) ) {
 
-                $this->zip = new \ZipArchive();
-                $file = $this->app->config['download'].$filename.'.zip';
+                $google = new Google( $this );
+                $__import = "/* original: {$_POST['url']} */\n\r" .
+                $google->getImportHeader($_POST['url']);
 
-                if ( $this->zip->open( $file, \ZipArchive::CREATE) !== TRUE )
-                throw new \Exception('no file');
+                $filename = hash('xxh64', $_POST['url']);
 
-                $content = $google->parse($__import);
+                if ( $_POST['type'] == 'download' ) {
 
-                $this->zip->addFromString(
-                $this->addOrderName('import.css'), $content);
-                $this->zip->close();
+                    $this->zip = new \ZipArchive();
+                    $file = $this->app->config['download'].$filename.'.zip';
+                    if ( is_file( $file ) ) unlink( $file );
 
-            } else {
+                    if ( $this->zip->open( $file, \ZipArchive::CREATE) !== TRUE )
+                    throw new \Exception('no file');
 
-                $file = $this->app->config['download'].$filename.'.css';
-                file_put_contents($file, $google->parse($__import));
+                    $content = $google->parse($__import);
+
+                    $this->zip->addFromString($this->addFolderName('import.css'), $content);
+                    $this->zip->close();
+
+                } else {
+
+                    $file = $this->app->config['download'].$filename.'.css';
+                    file_put_contents($file, $google->parse($__import));
+                }
+
+                $return = [ 'success' => 1, 'file' => $this->host() .
+                            '/download/' . basename($file) ];
             }
 
-            $this->file = $this->host() . '/download/' . basename($file);
+        } catch (\Exception $e ){
 
-            $this->home();
+            $return = ['error' => $e->getMessage()];
+
+        } finally {
+
+            $this->json($return);
         }
+
+
     }
 }
 
